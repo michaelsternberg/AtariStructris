@@ -16,5 +16,5 @@ If you just want the game disk look in the Downloads section for "STRUCTRS.ATR"
 0.1
 
 # Known Bugs #
-Graphics mode glitches during cut-scene animation
-Pink pieces occasionally hesitate before making appearance
+   * Graphics mode glitches during cut-scene animation
+   * Pink pieces occasionally hesitate before making appearance
