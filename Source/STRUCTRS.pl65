@@ -1,0 +1,1214 @@
+INCLUDE D:GRAPHICS.LIB
+INCLUDE D:PEEKPOKE.LIB
+
+! MEMORY MAP
+BYTE DL[490]          = $8DA0
+BYTE FRAME_TEXT[120]  = $9F86
+BYTE FRAME_GR[5120]   = $A000
+
+! GLOBALS
+INT SCORE, LV, OX
+INT ORIGIN, DELAY
+BYTE WELL, FLOOR
+BYTE W, HEIGHT, HEIGHT2
+BYTE MH, CX, CY, M, X, Y
+BYTE H0, HL, HR, HB
+BYTE RG, RC, RD
+BYTE CI, BL, B0, BR, SL, SX, SR
+BYTE LC, DC
+
+CONST DUMMY3 = @
+@=$8D00
+BYTE H[22]
+@=DUMMY3
+
+POINTER P1, P2, P3, P4
+BYTE V1 BASED P1
+BYTE V2 BASED P2
+BYTE V3 BASED P3
+BYTE V4 BASED P4
+BYTE KEYCH  = $02FC
+
+! SYMBOLS
+CONST GRWIDTH = $20
+
+CONST LMARGN = $52
+CONST ROWCRS = $54
+CONST COLCRS = $55
+CONST SAVMSC = $58
+CONST CRSINH = $02F0
+CONST SDMCTL = $022F
+CONST SDLIST = $0230
+CONST GPRIOR = $026F
+CONST PCOLR0 = $02C0
+CONST PCOLR1 = $02C1
+CONST PCOLR2 = $02C2
+CONST PCOLR3 = $02C3
+CONST COLOR0 = $02C4
+CONST COLOR1 = $02C5
+CONST COLOR2 = $02C6
+CONST COLOR3 = $02C7
+CONST COLOR4 = $02C8
+!CONST KEYCH  = $02FC
+
+! HARDWARE REGISTERS
+CONST COLPM0 = $D012
+CONST COLPM1 = $D013
+CONST COLPM2 = $D014
+CONST COLPM3 = $D015
+CONST COLPF0 = $D016
+CONST COLPF1 = $D017
+CONST COLPF2 = $D018
+CONST COLPF3 = $D019
+CONST COLBK  = $D01A
+CONST PRIOR  = $D01B
+CONST WSYNC  = $D40A
+
+! COLORS
+CONST BLACK  = $00
+CONST GRAY   = $08
+CONST WHITE  = $0F
+CONST YELLOW = $2C
+CONST ORANGE = $36
+CONST PURPLE = $54
+CONST PINK   = $5C
+CONST DKBLUE = $64
+CONST LTBLUE = $8C
+CONST BLUE   = $84
+CONST GREEN  = $C6
+
+!---------------------------------------
+! DISPLAY LIST INTERRUPTS
+!---------------------------------------
+CONST DUMMY=@
+@=$8B00
+INTERRUPT DLINT1()
+INT VDSLST = $0200
+BEGIN
+  STA WSYNC
+  LDA $84     STA PRIOR
+  LDA #ORANGE STA COLPF1
+  LDA #YELLOW STA COLPF2
+  LDA #GRAY   STA COLBK
+  VDSLST = $8C00
+END
+
+@=$8C00
+INTERRUPT DLINT2()
+INT VDSLST = $0200
+BEGIN
+  STA WSYNC
+  LDA #$00   STA PRIOR
+  LDA #WHITE STA COLPF1
+  LDA #BLACK STA COLPF2 STA COLBK
+  VDSLST = $8B00
+END
+@=DUMMY
+
+!---------------------------------------
+! DISPLAY INTERRUPT ENABLE
+!---------------------------------------
+PROC DLI_ENABLE()
+INT  VDSLST = $0200
+BYTE NMIEN  = $D40E
+BEGIN
+  VDSLST = $8B00
+  NMIEN  = $C0
+END
+
+!---------------------------------------
+! DISPLAY INTERRUPT DISABLE
+!---------------------------------------
+PROC DLI_DISABLE()
+BYTE NMIEN  = $D40E
+BEGIN
+  NMIEN  = $00
+END
+
+!---------------------------------------
+! RND returns a random 16 bit number
+!---------------------------------------
+FUNC RND*()
+BYTE RANDOM=$D20A
+BEGIN
+  LDA RANDOM
+  LDY RANDOM
+  JSR PUSH
+END
+
+!---------------------------------------
+! RAND returns a random number
+!      in the range 0 to range-1
+!---------------------------------------
+FUNC RAND(BYTE range)
+BEGIN
+END RND()/(65535/range)
+
+
+!---------------------------------------
+! SET COLORS
+!---------------------------------------
+PROC SET_COLORS()
+BEGIN
+  POKE(PCOLR0, BLACK)
+  POKE(PCOLR1, PURPLE)
+  POKE(PCOLR2, BLUE)
+  POKE(PCOLR3, DKBLUE)
+  POKE(COLOR0, PINK)
+  POKE(COLOR1, ORANGE)
+  POKE(COLOR2, YELLOW)
+  POKE(COLOR3, GREEN)
+  POKE(COLOR4, GRAY)
+END
+
+!---------------------------------------
+! SET DISPLAY LIST
+!---------------------------------------
+PROC SET_DL()
+INT  I, J, K, GR_ADR
+BEGIN
+  POKE(SDMCTL,$00)
+  DLI_DISABLE()
+  GR_ADR = .FRAME_GR
+
+  ! 2x 8 BLANK SCANLINES 
+  ! 1x 8 BLANK SCANLINES & DLI
+  DL[0] = $70
+  DL[1] = $70
+  DL[2] = $F0
+
+  ! 160 LINES OF MODE 10
+  ! EACH SET OF 4 SCANLINES 
+  ! POINT TO SAME MEMORY RANGE
+  K = 3
+  FOR I = 0 TO 39 DO
+    FOR J = 0 TO 3 DO
+      DL[K] = $4F
+      DOKE(.DL+K+1, GR_ADR)
+      K = K + 3
+    NEXT
+    GR_ADR  = GR_ADR + $20
+  NEXT 
+  
+  ! OVERWRITE LAST MODE F ADD DLI
+  ! TO ENABLE NORMAL TEXT AT BOTTOM
+  DL[K-3] = $CF
+
+  ! TEXT FRAME
+  DL[K+0] = $42
+  DOKE(.DL+K+1, .FRAME_TEXT)
+  DL[K+3] = $02
+  DL[K+4] = $02
+  DL[K+5] = $02
+
+  ! JVB
+  DL[K+6] = $41
+  DOKE(.DL+K+7, .DL)
+
+  ! INSTALL NEW DISPLAY LIST
+  ! 1. TURN OFF ANTIC
+  ! 2. POINT TO NEW DISPLAY_LIST
+  ! 3. TURN ON ANTIC
+  POKE(SDMCTL,$00)
+  DOKE(SDLIST,.DL)
+  POKE(SDMCTL,$21)
+
+  ! ENABLE GTIA MODE 10
+  POKE(GPRIOR,$84)
+  POKE(PRIOR,$84)
+  !POKE($0293,$00)
+  !DOKE($0294,.FRAME_TEXT)
+  !DOKE($58,.FRAME_TEXT)
+  DLI_ENABLE()
+END
+
+!---------------------------------------
+! GET KEY
+!---------------------------------------
+FUNC GET_KEY()
+BYTE KEY
+BEGIN
+  CLOSE(1)
+  OPEN(1,4,0,"K:")
+  KEY = GET(1)
+  CLOSE(1)
+END KEY
+!---------------------------------------
+! SET LEVEL
+!---------------------------------------
+PROC SET_LEVEL(INT L)
+BEGIN
+  LV = L
+  WELL = LV MOD 10
+  IF WELL = 0 THEN  WELL = 10 ENDIF
+  FLOOR = 39 - 2 * WELL
+END
+
+!---------------------------------------
+! HOME
+!---------------------------------------
+PROC HOME()
+BEGIN
+  WRTLN(CHR$(125))
+END
+
+!---------------------------------------
+! HOME
+!---------------------------------------
+PROC HOME2()
+BYTE I
+BEGIN
+  I  = 0
+  WHILE I < 128 DO
+    P1 = .FRAME_TEXT + I
+    V1 = $00 
+    INC I
+  ENDWHILE
+END
+
+!---------------------------------------
+! HELP SCREEN
+!---------------------------------------
+PROC HELP_SCREEN()
+BYTE KEY
+BEGIN
+  SETCOLOR(2,0,0)
+  POKE(CRSINH,$FF)
+  POKE(LMARGN,0) CR()
+  HOME()
+  WRTLN("WELCOME TO STRUCTRIS!")
+  CR()
+  WRTLN("ATARI PORT BY MICHAEL STERNBERG (2015)")
+  WRTLN("BASED ORIG WORK BY MARTIN HAYE (2010)")
+  CR()
+  CR() 
+  WRTLN("KEYS:")
+  WRTLN("  I: UP")
+  WRTLN("  J: LEFT")
+  WRTLN("  K: RIGHT (ALTERNATE: L)")
+  WRTLN("  M: DOWN") CR()
+  WRTLN("BUILD UP THE TETRIS BLOCKS. YOU CANNOT")
+  WRTLN("ROTATE THEM. EVIL PROGRAMMER LAUNCHES")
+  WRTLN("BLOCKS WHERE YOU ARE TO TRAP YOU. DON'T")
+  WRTLN("GET TRAPPED. FINISHED ROWS FALL AWAY.")
+  CR()
+  WRTLN("CLEAR ENOUGH ROWS: NEXT LEVEL! HARDER!")
+  CR()
+  WRTLN("HIT A KEY TO BEGIN THE TORTURE.")
+  KEY = GET_KEY()
+  POKE(CRSINH,0)
+END
+
+!---------------------------------------
+! INIT
+!---------------------------------------
+PROC INIT()
+INT I
+BEGIN
+  SET_LEVEL(1)
+  SET_COLORS()
+  SET_DL()
+  SCORE = 0
+END
+
+!---------------------------------------
+! CLEAR WELL
+!---------------------------------------
+PROC CLEAR_WELL()
+INT I, J
+BEGIN
+  P1 = .FRAME_GR
+  FOR I = 0 TO 31 DO
+    FOR J = 0 TO FLOOR DO
+      V1 = $00
+      P1 = P1 + 1
+    NEXT
+  NEXT
+END
+
+!---------------------------------------
+! LPLOT
+!---------------------------------------
+PROC LPLOT (BYTE X, Y, C)
+BEGIN
+  P1 = .FRAME_GR + $20 * Y + X
+  V1 = C
+END
+
+!---------------------------------------
+! SCRN
+!---------------------------------------
+FUNC SCRN (BYTE X, Y)
+BEGIN
+  P1 = .FRAME_GR + $20 * Y + X
+END V1
+
+!---------------------------------------
+! HLIN - PLOT HORIZ LINE AT Y=0
+!---------------------------------------
+PROC HLIN (BYTE X1, X2, C)
+BEGIN
+  WHILE X1 <= X2 DO
+    LPLOT(X1,1,C)
+    INC X1
+  ENDWHILE 
+END
+
+!---------------------------------------
+! LPRINT
+!---------------------------------------
+PROC LPRINT(BYTE X, Y INT ADDR BYTE LEN)
+BEGIN
+  P1 = .FRAME_TEXT + $20 * Y + X
+  P2 = ADDR
+  WHILE LEN > 0 DO
+    V1 = V2 - $20
+    P1 = P1 + 1
+    P2 = P2 + 1
+    DEC LEN
+  ENDWHILE
+END
+
+!---------------------------------------
+! MYSTR
+!---------------------------------------
+PROC MYSTR(BYTE X, Y INT NUM) 
+STRING SBUFF$[3] 
+BYTE D,L
+BEGIN
+  SBUFF$ = "  "
+  L = 0
+  IF NUM >= 10 THEN L = 1 ENDIF
+
+  D = NUM MOD 10 + $30
+  POKE(.SBUFF + L, D)
+
+  IF NUM >= 10 THEN
+    D = NUM / 10 + $30
+    POKE(.SBUFF + L - 1, D)
+  ENDIF
+  LPRINT(X,Y,SBUFF$)
+END
+
+
+!---------------------------------------
+! PRINT LEVEL
+!---------------------------------------
+PROC PRINT_LEVEL()
+BYTE D, L
+BEGIN
+  LPRINT(12,0,"LEVEL:     ")
+
+  L = 1
+  IF LV >= 10 THEN L = 2 ENDIF
+  IF LV >= 99 THEN L = 3 ENDIF
+
+  D = LV MOD 10 + $10
+  POKE(.FRAME_TEXT + 17 + L, D)
+
+  IF LV >= 10 THEN
+    D = LV /  10 + $10  
+    POKE(.FRAME_TEXT + 17 + L - 1, D)
+  ENDIF
+
+  IF LV >= 100 THEN
+    D = (LV MOD 100) / 10 + $10
+    POKE(.FRAME_TEXT + 17 + L - 1, D)
+
+    D = LV / 100 + $10
+    POKE(.FRAME_TEXT + 17 + L - 2, D)
+  ENDIF
+END
+
+!---------------------------------------
+! DRAW WELL
+!---------------------------------------
+PROC DRAW_WELL()
+BYTE X1, X2, Y1, Y2
+INT I
+BEGIN
+  X1 = WELL
+  X2 = 31 - WELL
+  Y1 = 41 - 2 * WELL - 1
+  Y2 = Y1 + 1
+
+  CLEAR_WELL()
+
+  ! DRAW WALLS
+  FOR I = 0 TO Y2 + 1 DO
+    LPLOT(X1, I, $88)
+    LPLOT(X2, I, $88)
+  NEXT
+
+  ! DRAW BLACK LINES OVER PREV WALLS
+  FOR I = 0 TO Y2 DO
+    LPLOT(X1-1, I, $00)
+    LPLOT(X2+1, I, $00)
+  NEXT
+    
+  ! DRAW CHECKBOARD1
+  FOR I = X1 + 1 TO X2 - 1 STEP 2 DO
+    LPLOT(I, Y1, $88)
+    LPLOT(I, Y2, $22)
+  NEXT
+
+  ! DRAW CHECKBOARD1
+  FOR I = X1 + 2 TO X2 - 1 STEP 2 DO
+    LPLOT(I, Y1, $22)
+    LPLOT(I, Y2, $88)
+  NEXT
+
+  PRINT_LEVEL()
+  LPRINT (11, 1, "SCORE        ")
+  LPRINT (10, 2, "CLEARED")
+END
+
+!---------------------------------------
+! PRINT NUM CLEARED
+!---------------------------------------
+PROC PRINT_ROWS_CLEARED()
+BYTE X1,X2
+INT A1
+BEGIN
+  A1 = $8D01
+  P1 = A1
+  WHILE V1 <> $F7 DO
+    V1 = V1 - 1
+    A1 = A1 + 1
+    P1 = A1
+  ENDWHILE
+
+  X1 = 19
+  X2 = 20
+  IF RD >= 10 THEN
+    INC X1 INC X2
+  ENDIF
+  MYSTR(17,1,SCORE)
+  MYSTR(18,2,RD)
+  LPRINT(X1,2,"/")
+  MYSTR(X2,2,RG)
+END
+
+!---------------------------------------
+! LEVEL INIT
+!---------------------------------------
+PROC LEVEL_INIT()
+INT I
+BEGIN
+  ORIGIN = .FRAME_GR + 1249 - 63 * WELL
+  W = 15 - WELL
+  HEIGHT = 20 - WELL
+  MH = HEIGHT - 1
+  OX = (32 - W * 2) / 2
+  M = 0 HB = 0
+  H[0] = -9 H[W + 1] = -9
+  FOR I = 1 TO W DO H[I] = 1 NEXT
+  X = -99
+  !CX = OX + W CY = (37 - LV) * 2 - 1
+  CX = OX + W CY = -2 * WELL + 39
+  HEIGHT2 = CY + 1
+  RG = 5 + WELL * 2 RD = 0 RC = 0 
+  DELAY = 175 * WELL + 1125
+  DC = (LV - 1) / 10
+  HOME2()
+  DRAW_WELL()
+  PRINT_ROWS_CLEARED()
+END
+
+
+!---------------------------------------
+! SCROLL
+!---------------------------------------
+PROC SCROLL()
+INT A1, A2
+BYTE R, S, CL
+BEGIN
+  ! CHECK TO SEE IF BOTTOM ROW IS CLEAR
+  CL = 0 R = 0 S = 0 A1 = ORIGIN P1 = ORIGIN
+  WHILE V1 <> $88 DO
+    IF V1 = $00 THEN 
+      INC R 
+    ELSE  
+      INC S 
+    ENDIF
+    A1 = A1 + 2  P1 = A1
+  ENDWHILE
+
+  ! IF CLEARED
+  IF R = 0 AND S > 0 THEN
+    INC CL
+    INC RC
+    IF RC >= 3 THEN
+      RC = 0
+      INC RD 
+      SCORE = SCORE + 1
+      PRINT_ROWS_CLEARED()
+    ENDIF
+  ENDIF
+
+  R = CL
+  S = HEIGHT2
+  A1 = ORIGIN
+  A2 = A1 - 32
+  P1 = A1 P2 = A2 P3 = A1 + 1 P4 = A2 + 1
+  WHILE V1 <> $88 DO
+    WHILE S > 0 DO
+      IF R = 0 AND V1 = $00 THEN R = 1 ENDIF
+      IF R = 1 THEN 
+        V1 = V2 V3 = V4
+        IF S = 1 THEN V2 = $00 V4 = $00 ENDIF
+      ENDIF 
+      P1 = A2 P3 = A2 + 1 A2 = A2 - 32 
+      P2 = A2 P4 = A2 + 1
+      DEC S
+    ENDWHILE
+    A1 = A1 + 2 A2 = A1 - 32
+    P1 = A1 P2 = A2 P3 = A1 + 1 P4 = A2 + 1
+    S = 37 - LV
+    R = CL
+  ENDWHILE
+END
+
+CONST DUMMY4 = @
+@ = $8800
+!-----------------------------
+! SCROLL2
+!-----------------------------
+PROC SCROLL2()
+INT A1, A2
+BYTE FILL_FL, HGT, CL
+BEGIN
+  ! CHECK TO SEE IF BOTTOM ROW IS CLEAR
+  ! SCAN BOTTOM ROW
+  !CL = 0 R = 0 S = 0
+  LDA #$00
+  STA CL
+  STA FILL_FL
+  STA HGT
+
+  IF RD >= RG THEN FILL_FL = 1 ENDIF
+
+  !A1 = ORIGIN
+  LDA ORIGIN+1
+  LDY ORIGIN
+  STY A1
+  STA A1+1
+
+  !P1 = ORIGIN
+  STY P1
+  STA P1+1
+
+  !WHILE V1 <> $88 DO
+  LDY #$00
+:wh01
+  LDA (P1),Y
+  CMP #$88
+  BEQ endw01
+  CMP #$00
+  BNE inc_s
+  INC FILL_FL
+  GOTO endif01
+:inc_s
+  INC HGT
+:endif01
+  INY 
+  INY 
+  JMP wh01
+:endw01
+
+  !IF R = 0 AND S > 0 THEN
+  LDA FILL_FL
+  BNE endif04
+  LDA HGT
+  BEQ endif04
+  INC CL
+    ! INC RC IF RC < 3 THEN SKIP
+  INC RC
+  LDA RC
+  CMP #$03
+  BNE endif04
+  INC RD
+
+  ! SCORE = SCORE + 1
+  CLC
+  LDA SCORE
+  ADC #$01
+  STA SCORE
+  LDA SCORE+1
+  ADC #$00
+  STA SCORE+1
+  
+  JSR PRINT_ROWS_CLEARED
+  LDA #$00
+  STA RC
+:endif04
+
+  ! FILL_FL = CL
+  LDA CL
+  STA FILL_FL
+
+  !HGT = HEIGHT2
+  LDA HEIGHT2
+  STA HGT
+
+  ! A1 = ORIGIN
+  LDA ORIGIN+1
+  LDY ORIGIN
+  STY A1
+  STA A1+1
+
+  !A2 = A1 - 32
+  SEC
+  LDA A1
+  SBC #$20
+  STA A2
+  LDA A1+1
+  SBC #$00
+  STA A2+1
+
+  !P1 = A1
+  LDA A1+1
+  LDY A1
+  STA P1+1
+  STY P1
+
+  !P2 = A2
+  LDA A2+1
+  LDY A2
+  STA P2+1
+  STY P2
+
+  !P3 = A1 + 1
+  LDA A1
+  LDY A1+1
+  STY P3+1
+  CLC
+  ADC #$01
+  STA P3
+  BCC add02
+  INC P3+1
+:add02
+
+  !P4 = A2 + 1
+  LDA A2
+  LDY A2+1
+  STY P4+1
+  CLC
+  ADC #$01
+  STA P4
+  BCC add03
+  INC P4+1
+:add03
+  
+  !WHILE V1 <> $88 DO
+:wh02
+  LDY #$00
+  LDA (P1),Y
+  CMP #$88
+  BNE wh03
+  GOTO endw02
+
+    !WHILE HGT > 0 DO
+:wh03
+  LDA HGT
+  BEQ endw03
+
+      !IF FILL_FL = 0 AND V1 = $00 THEN FILL_FL = 1 ENDIF
+  LDA FILL_FL
+  BNE endif02
+  LDY #$00
+  LDA (P1),Y
+  BNE endif02
+  LDA #$01
+  STA FILL_FL
+:endif02
+
+      !IF FILL_FL = 1 THEN 
+  LDA FILL_FL
+  BEQ endif03
+
+        !V1 = V2 V3 = V4
+  LDY #$00
+  LDA (P2),Y
+  STA (P1),Y
+  LDA (P4),Y
+  STA (P3),Y
+
+        !IF HGT = 1 THEN V2 = $00 V4 = $00 ENDIF
+  LDA HGT
+  CMP #$01
+  BNE endif03
+  LDA #$00
+  STA (P2),Y
+  STA (P4),Y
+      !ENDIF 
+:endif03
+
+      !P1 = A2
+  LDA A2+1
+  LDY A2
+  STA P1+1
+  STY P1  
+
+      !P3 = A2 + 1
+  LDA A2
+  LDY A2+1
+  STY P3+1
+  CLC
+  ADC #$01
+  STA P3
+  BCC add04
+  INC P3+1
+:add04
+
+      !A2 = A2 - 32 
+  SEC
+  LDA A2
+  SBC #$20
+  STA A2
+  LDA A2+1
+  SBC #$00
+  STA A2+1
+
+      !P2 = A2
+  LDA A2+1
+  LDY A2
+  STA P2+1
+  STY P2
+
+      !P4 = A2 + 1
+  LDA A2
+  LDY A2+1
+  STY P4+1
+  CLC
+  ADC #$01
+  STA P4
+  BCC add05
+  INC P4+1
+:add05
+
+  DEC HGT
+    !ENDWHILE
+  JMP wh03
+:endw03
+
+    !A1 = A1 + 2
+    CLC
+    LDA A1
+    ADC #$02
+    STA A1
+    BCC add01
+    INC A1+1
+:add01
+
+!    A2 = A1 - 32
+    SEC
+    LDA A1
+    SBC #$20
+    STA A2
+    LDA A1+1
+    SBC #$00
+    STA A2+1
+
+    !P1 = A1
+    LDA A1+1
+    LDY A1
+    STA P1+1
+    STY P1
+
+    !P2 = A2
+    LDA A2+1
+    LDY A2
+    STA P2+1
+    STY P2
+
+   ! P3 = A1 + 1
+    LDA A1
+    LDY A1+1
+    STY P3+1
+    CLC
+    ADC #$01
+    STA P3
+    BCC add06
+    INC P3+1
+:add06
+
+    !P4 = A2 + 1
+    LDA A2
+    LDY A2+1
+    STY P4+1
+    CLC
+    ADC #$01
+    STA P4
+    BCC add07
+    INC P4+1
+:add07
+
+    !S = HEIGHT2
+    LDA HEIGHT2
+    STA HGT
+
+    !R = CL
+    LDA CL
+    STA FILL_FL
+    JMP wh02
+
+  !ENDWHILE
+:endw02
+END
+@ = DUMMY4
+
+!---------------------------------------
+! KB PROC
+!---------------------------------------
+FUNC KB_PROC()
+BYTE RET, COLR
+BEGIN
+  RET = 1
+  LPLOT(CX,CY,$00)
+  SCROLL2()
+  IF SCRN(CX,CY) <> $00 THEN 
+    IF SCRN(CX,CY+1) <> $00 THEN 
+      RET = 0
+    ENDIF 
+    INC CY
+  ENDIF
+  IF RET = 1 THEN
+    CASE KEYCH
+      OF $0D DO IF SCRN(CX, CY-1) = $00 AND CY > 1 THEN DEC CY ENDIF ENDOF
+      OF $01 DO IF SCRN(CX-1, CY) = $00            THEN DEC CX ENDIF ENDOF
+      OF $05 DO IF SCRN(CX, CY+1) = $00            THEN INC CY ENDIF ENDOF
+      OF $44 DO IF SCRN(CX, CY+1) = $00            THEN INC CY ENDIF ENDOF
+      OF $00 DO IF SCRN(CX+1, CY) = $00            THEN INC CX ENDIF ENDOF
+    ENDCASE
+  ENDIF
+  ! CLEAR KB REGISTER
+  KEYCH = $FF
+
+  ! BLINK BLIP AFTER LV 10
+  IF LC >= DC * 15 THEN
+    COLR = $66 LC = 1
+  ELSE
+    COLR = $00 INC LC
+  ENDIF
+
+  ! SHOW BLIP
+  LPLOT(CX,CY,COLR)
+
+  ! IF ROWS DONE >= ROWS GOAL
+  IF RD >= RG THEN RET = 2 ENDIF
+END RET
+
+!---------------------------------------
+! PICK_X_COORD
+!---------------------------------------
+PROC PICK_X_COORD()
+BYTE I
+BEGIN
+  IF X > 128 THEN X = (CX - OX) / 2 + 1 ENDIF
+  IF X > 128 OR X < 1 THEN X = -9 RETURN ENDIF
+  IF X > W THEN X = -9 RETURN ENDIF
+  IF X > 1 AND H[X-1] < H[X] THEN DEC X
+  ELSE
+    IF X < W AND H[X+1] < H[X] THEN INC X ENDIF
+  ENDIF
+  IF H[X] - HB < MH THEN INC M ENDIF
+END
+
+!---------------------------------------
+! CALC_SHAPE_CONSTRAINTS
+!---------------------------------------
+PROC CALC_SHAPE_CONSTRAINTS()
+BEGIN
+  H0 = H[X]
+  HL = H[X-1] - H0
+  HR = H[X+1] - H0
+  IF HR > 3   THEN HR = 3 ENDIF
+  IF HL > 3   THEN HL = 3 ENDIF
+  INC M
+END
+
+!---------------------------------------
+! APPLY CHOSEN COORD
+!---------------------------------------
+PROC APPLY_CHOSEN_COORD()
+BEGIN
+  H[X-1] = H[X-1] + BL
+  H[X]   = H[X]   + B0
+  H[X+1] = H[X+1] + BR
+  SX = (X - 1) * 2 + OX
+  IF BL = 0 THEN SL = 0 GOTO _745 ENDIF
+  BL = BL * 3 SL = HL * 3
+:_745
+  IF BR = 0 THEN GOTO _755 ENDIF
+  BR = BR * 3 SR = HR * 3
+:_755
+  B0 = B0 * 3 
+  INC M
+END
+
+!---------------------------------------
+! CHOOSE_SHAPE
+!---------------------------------------
+PROC CHOOSE_SHAPE()
+BYTE I
+BEGIN
+  INC M
+  I =  HL * 4 + HR
+  CASE I
+    ! 000
+    OF 0 DO 
+      CASE RAND(4) 
+        OF 0 DO CI = $11 BL = 1 B0 = 1 BR = 2 ENDOF
+        OF 1 DO CI = $22 BL = 2 B0 = 1 BR = 1 ENDOF
+        OF 2 DO CI = $66 BL = 1 B0 = 2 BR = 1 ENDOF
+        OF 3 DO CI = $77 BL = 1 B0 = 1 BR = 1 ENDOF
+      ENDCASE
+    ENDOF
+    ! 001
+    OF 1 DO     CI = $44 BL = 1 B0 = 2 BR = 1 ENDOF
+    ! 002
+    OF 2 DO     CI = $22 BL = 0 B0 = 3 BR = 1 ENDOF
+    ! 003
+    OF 3 DO
+      CASE RAND(3)
+        OF 0 DO CI = $11 BL = 3 B0 = 1 BR = 0 ENDOF
+        OF 1 DO CI = $22 BL = 1 B0 = 3 BR = 0 ENDOF
+        OF 2 DO CI = $33 BL = 2 B0 = 2 BR = 0 ENDOF
+      ENDCASE
+    ENDOF
+    ! 100
+    OF 4 DO     CI = $55 BL = 1 B0 = 2 BR = 1 ENDOF
+    ! 101
+    OF 5 DO     CI = $66 BL = 1 B0 = 2 BR = 1 ENDOF
+    ! 102
+    OF 6 DO
+      CASE RAND(2)
+        OF 0 DO CI = $44 BL = 2 B0 = 2 BR = 0 ENDOF
+        OF 0 DO CI = $66 BL = 1 B0 = 3 BR = 0 ENDOF
+      ENDCASE
+    ENDOF
+    ! 103
+    OF 7 DO
+      CASE RAND(2)
+        OF 0 DO CI = $44 BL = 2 B0 = 2 BR = 0 ENDOF
+        OF 0 DO CI = $66 BL = 1 B0 = 3 BR = 0 ENDOF
+      ENDCASE
+    ENDOF
+    ! 200
+    OF 8 DO     CI = $11 BL = 1 B0 = 3 BR = 0 ENDOF
+    ! 201
+    OF 9 DO     CI = $11 BL = 1 B0 = 3 BR = 0 ENDOF
+    ! 202
+    OF 10 DO
+      CASE RAND(2)
+        OF 0 DO CI = $11 BL = 1 B0 = 3 BR = 0 ENDOF
+        OF 1 DO CI = $22 BL = 0 B0 = 3 BR = 1 ENDOF
+      ENDCASE
+    ENDOF
+    ! 203
+    OF 11 DO    CI = $11 BL = 1 B0 = 3 BR = 0 ENDOF
+    ! 300
+    OF 12 DO
+      CASE RAND(3)
+        OF 0 DO CI = $11 BL = 0 B0 = 3 BR = 1 ENDOF
+        OF 1 DO CI = $22 BL = 0 B0 = 1 BR = 3 ENDOF 
+        OF 2 DO CI = $33 BL = 0 B0 = 2 BR = 2 ENDOF
+      ENDCASE
+    ENDOF
+    ! 301
+    OF 13 DO
+      CASE RAND(2)
+        OF 0 DO CI = $55 BL = 0 B0 = 2 BR = 2 ENDOF
+        OF 1 DO CI = $66 BL = 0 B0 = 3 BR = 1 ENDOF
+      ENDCASE
+    ENDOF
+    ! 302
+    OF 14 DO    CI = $22 BL = 0 B0 = 3 BR = 1 ENDOF
+    ! 303
+    OF 15 DO    CI = $77 BL = 0 B0 = 3 BR = 0 ENDOF
+  ENDCASE
+END
+
+!---------------------------------------
+! PLOT_A_LINE
+!---------------------------------------
+PROC PLOT_A_LINE()
+BEGIN
+  IF BL = 0 THEN GOTO _835 ENDIF
+  IF SL > 0 AND SL < 128 THEN 
+      DEC SL
+      GOTO _835
+  ENDIF
+  DEC BL
+  HLIN(SX-2,SX-1,CI)
+  IF SL <> 0 THEN LPRINT (0,0,"WHOA!") ENDIF
+:_835
+  IF B0 = 0 THEN GOTO _850 ENDIF
+  DEC B0
+  HLIN(SX,SX+1,CI)
+:_850
+  IF BR = 0 THEN GOTO _870 ENDIF
+  IF SR > 0 AND SR < 128 THEN
+    DEC SR
+    GOTO _870
+  ENDIF
+  DEC BR
+  HLIN(SX+2,SX+3,CI)
+:_870
+  IF BL + B0 + BR = 0 THEN
+    X = -99
+    M = 0
+  ENDIF
+END
+
+!---------------------------------------
+! MYDEBUG
+!---------------------------------------
+PROC MYDEBUG()
+BEGIN
+  LPRINT(0,0,"CX:  ") LPRINT(3,0,STR$(CX))
+  LPRINT(0,1,"CY:  ") LPRINT(3,1,STR$(CY))
+  LPRINT(0,2,"OX:  ") LPRINT(3,2,STR$(OX))
+  LPRINT(0,3,"W:   ") LPRINT(3,3,STR$(W))
+
+  LPRINT(6,0,"X:   ") LPRINT(9,0,STR$(X))
+  LPRINT(6,1,"HL: ") LPRINT(9,1,STR$(HL))
+  LPRINT(6,2,"H0: ") LPRINT(9,2,STR$(H0))
+  LPRINT(6,3,"HR: ") LPRINT(9,3,STR$(HR))
+
+  LPRINT(12,0,"M:  ") LPRINT(15,0,STR$(M))
+  LPRINT(12,1,"BL:  ") LPRINT(15,1,STR$(BL))
+  LPRINT(12,2,"B0:  ") LPRINT(15,2,STR$(B0))
+  LPRINT(12,3,"BR:  ") LPRINT(15,3,STR$(BR))
+
+  LPRINT(17,0,"SL:  ") LPRINT(20,0,STR$(SL))
+  LPRINT(17,1,"SR:  ") LPRINT(20,1,STR$(SR))
+  LPRINT(17,2,"SX:  ") LPRINT(20,2,STR$(SX))
+END
+
+!---------------------------------------
+! GOTCHA
+!---------------------------------------
+FUNC GOTCHA()
+BYTE KEY
+BYTE R,N,Q
+BEGIN
+  KEY = 0
+  KEYCH = $FF
+  R = ASC("R")
+  N = ASC("N")
+  Q = ASC("Q")
+  LPRINT(9,0,"    OOPS!     ")
+  LPRINT(4,2,"R)ESTART, N)EW, OR Q)UIT?") 
+  OPEN(1,4,0,"K:")
+  WHILE KEY <> R AND KEY <> N AND KEY <> Q DO
+    KEY = GET(1)
+    LPRINT(29,2,.KEY,1)
+  ENDWHILE
+  CLOSE(1)
+END KEY
+
+!---------------------------------------
+! BYE_NOW
+!---------------------------------------
+PROC BYE_NOW()
+INT I
+BEGIN
+  I = 3000 
+  WHILE I > 0 DO
+    I = I - 1
+  ENDWHILE
+  GRAPHICS(0) HOME() WRTLN("BYE NOW.")
+END
+
+!---------------------------------------
+! COOLER CLEAR
+!---------------------------------------
+PROC COOLER_CLEAR()
+INT A1, A2, I, J, K
+POINTER P1
+BYTE V1 BASED P1
+BEGIN
+  LPLOT(CX,CY,$00)
+  FOR I = 0 TO HEIGHT2 DO
+    SCROLL2()
+  NEXT
+  J = -2 * WELL + 39
+  FOR I = 0 TO J DO
+    A1 = ORIGIN
+    P1 = A1
+    WHILE V1 <> $88 DO
+      V1 = $00
+      A1 = A1 + 1
+      P1 = A1
+    ENDWHILE
+    SCROLL2()
+  NEXT
+END
+
+!---------------------------------------
+! CONGRATS
+!---------------------------------------
+PROC CONGRATS()
+STRING S$[30]
+BYTE X
+BEGIN
+  CASE LV
+    OF 1 DO S$ = "GREAT JOB!" ENDOF
+    OF 2 DO S$ = "AWESOME DUDE." ENDOF
+    OF 3 DO S$ = "GOOD GOING..." ENDOF
+    OF 4 DO S$ = "STELLAR!" ENDOF
+    OF 5 DO S$ = "TETRIS SCHMETRIS" ENDOF
+    OF 6 DO S$ = "INCREDIBLE" ENDOF
+    OF 7 DO S$ = "MUCHO GONZO!" ENDOF
+    OF 8 DO S$ = "ALL THE WAY TO THE TOP" ENDOF
+    OF 9 DO S$ = "ONE MORE LEFT..." ENDOF
+    OF 10 DO S$ = "WOW! YOU DID IT! YOU WON!" ENDOF
+  ENDCASE
+  X = 0
+  WHILE X < LEN(S$) DO
+    POKE(.S+X,PEEK(.S+X) + 128)
+    INC X
+  ENDWHILE
+  X = 16 - LEN(S$) / 2
+  LPRINT(X,0,S$)
+  COOLER_CLEAR()
+END
+
+!---------------------------------------
+! MAIN
+!---------------------------------------
+MAIN()
+BYTE LOOP
+INT I
+BEGIN
+  DLI_ENABLE()
+  HELP_SCREEN() HOME()
+:_init
+  INIT() 
+:_level_init
+  LEVEL_INIT()
+  LOOP = 1
+  WHILE LOOP = 1 DO
+    CASE M
+      OF 0 DO PICK_X_COORD()            ENDOF
+      OF 1 DO CALC_SHAPE_CONSTRAINTS()  ENDOF
+      OF 2 DO CHOOSE_SHAPE()            ENDOF
+      OF 3 DO APPLY_CHOSEN_COORD()      ENDOF
+      OF 4 DO PLOT_A_LINE()             ENDOF
+    ENDCASE
+    LOOP = KB_PROC()
+    IF LOOP = 2 THEN 
+      CONGRATS() INC LV SET_LEVEL(LV)
+      GOTO _level_init 
+    ENDIF
+    FOR I = 0 TO DELAY DO NEXT
+  ENDWHILE
+  LOOP = GOTCHA()
+  CASE LOOP
+    OF ASC("R") DO SCORE = 0 GOTO _level_init ENDOF
+    OF ASC("N") DO GOTO _init       ENDOF
+    OF ASC("Q") DO BYE_NOW()        ENDOF
+  ENDCASE
+END
