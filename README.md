@@ -1,8 +1,11 @@
 # README #
 
-Structris for Atari 800.
+Structris for Atari 800
 
-Prerequisites
+Game Prerequisites
+  * Any Atari 800 emulator that reads ATR disk images (get the STRUCTRS.ATR file from the Downloads section).
+
+Build Prerequisites
 
    * atari800 emulator for Unix (Makefile uses recorded session to playback build process)
    * gcc (Used to compile simple C program to convert the ASCII file to something digestible to the Atari 800)
