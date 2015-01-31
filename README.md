@@ -3,6 +3,7 @@
 Structris for Atari 800
 
 Game Prerequisites
+
   * Any Atari 800 emulator that reads ATR disk images (get the STRUCTRS.ATR file from the Downloads section).
 
 Build Prerequisites
