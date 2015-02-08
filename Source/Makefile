@@ -8,7 +8,7 @@ UTL=pl65_to_prg
 all:	$(IMG)
 
 $(IMG):	$(TAR)
-	atari800 -atari -playback build.rec ../Disks/PL65_BW.atr $(IMG)
+	atari800 -atari -playback build.rec -H1 ../Work ../Disks/PL65_BW.atr $(IMG)
 
 $(TAR): $(SRC) $(UTL)
 	./pl65_to_prg $(SRC) > ../Work/$(TAR)
